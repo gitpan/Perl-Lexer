@@ -1,10 +1,10 @@
 package Perl::Lexer;
-use 5.018001;
+use 5.010000;
 use strict;
 use warnings;
 use B;
 
-our $VERSION = "0.02";
+our $VERSION = "0.03";
 
 use parent qw(Exporter);
 
