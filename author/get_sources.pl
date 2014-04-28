@@ -1,4 +1,5 @@
 #!/usr/bin/env perl
+use 5.010;
 use strict;
 use warnings;
 use FindBin;
@@ -7,7 +8,7 @@ use Archive::Tar;
 use version;
 
 # XXX: 5.8.8 and 5.8.9 also have debug_tokens.
-my $min_version = '5.010000';
+my $min_version = version->parse('5.010000');
 
 my $ua = HTTP::Tiny->new;
 
@@ -16,6 +17,12 @@ my @perl_versions;
     my $res = $ua->get("http://www.cpan.org/src/5.0/");
     die "Can't get perl versions" unless $res->{success};
     @perl_versions = $res->{content} =~ m!href="perl-(5\.\d+\.\d+).tar.gz"!g;
+    @perl_versions =
+        map {$_->[0]}
+        sort {$a->[1] <=> $b->[1]}
+        grep {$_->[1] >= $min_version}
+        map {[$_, version->parse($_)]}
+        @perl_versions;
 }
 
 my $src_dir = "$FindBin::Bin/src";
@@ -27,15 +34,18 @@ mkdir $dst_dir unless -d $dst_dir;
 open my $map, '>', "$dst_dir/token_info_map.h";
 
 my %seen;
-for my $version (sort @perl_versions) {
-    next if version->parse($version) < version->parse($min_version);
+my %prev;
+for my $version (@perl_versions) {
     next if $seen{$version}++;
-    say "downloading $version...";
+    say "processing $version...";
     my $file = "$src_dir/perl-$version.tar.gz";
-    my $res = $ua->mirror("http://www.cpan.org/src/5.0/perl-$version.tar.gz", $file);
-    unless ($res->{success}) {
-        warn "Can't download $version";
-        next;
+    if (!-f $file) {
+        say "downloading $version...";
+        my $res = $ua->mirror("http://www.cpan.org/src/5.0/perl-$version.tar.gz", $file);
+        unless ($res->{success}) {
+            warn "Can't download $version";
+            next;
+        }
     }
     my $tar = Archive::Tar->new($file, 1);
 
@@ -45,6 +55,7 @@ for my $version (sort @perl_versions) {
         $tar->extract_file("perl-$version/$name", "$src_dir/$vname");
     }
 
+    my $perly = '';
     {
         my $src = "$src_dir/perly-$version.h";
         my $dst = "$dst_dir/perly-$version.h";
@@ -53,11 +64,13 @@ for my $version (sort @perl_versions) {
         while(<$in>) {
             next if /PERL_CORE|PERL_IN_TOKE_C/;
             print $out $_;
+            $perly .= $_;
         }
         close $in;
         close $out;
     }
 
+    my $token_info = '';
     {
         my $src = "$src_dir/toke-$version.c";
         my $dst = "$dst_dir/token_info-$version.h";
@@ -71,18 +84,56 @@ for my $version (sort @perl_versions) {
             }
             if ($flag) {
                 print $out $_;
+                $token_info .= $_;
                 $flag = 0 if /^\s*$/;
             }
         }
     }
 
     my ($revision, $major, $minor) = split /\./, $version;
+
+    my $include_version = $version;
+    if ($prev{perly} && $prev{perly} eq $perly &&
+        $prev{token_info} && $prev{token_info} eq $token_info &&
+        $minor  # should always keep 5.x.0 for clarity
+    ) {
+        unlink "$dst_dir/perly-$version.h";
+        unlink "$dst_dir/token_info-$version.h";
+        $include_version = $prev{version};
+    } else {
+        $prev{perly} = $perly;
+        $prev{token_info} = $token_info;
+        $prev{version} = $version;
+    }
+
     my $if = keys %seen > 1 ? "elif" : "if";
 
     print $map <<"MAP";
 #$if PERL_VERSION == $major && PERL_SUBVERSION == $minor
-#include "token_info-$version.h"
+#include "token_info-$include_version.h"
 MAP
 }
 
-print $map "#endif\n";
+# fallback to the latest (so that we don't always need to rush everytime a new version of perl is released)
+if ($prev{perly} && $prev{token_info} && $prev{version}) {
+    {
+        open my $out, '>', "$dst_dir/perly-latest.h";
+        print $out $prev{perly};
+    }
+    {
+        open my $out, '>', "$dst_dir/token_info-latest.h";
+        say $out qq{#include "perly-latest.h"};
+        print $out $prev{token_info};
+    }
+    my ($revision, $major, $minor) = split /\./, $perl_versions[-1];
+    print $map <<"MAP";
+#elif PERL_VERSION > $major || (PERL_VERSION == $major && PERL_SUBVERSION > $minor)
+#include "token_info-latest.h"
+MAP
+}
+
+print $map <<"MAP";
+#else
+#error "No support for this perl version"
+#endif
+MAP

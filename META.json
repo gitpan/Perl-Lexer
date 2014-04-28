@@ -56,7 +56,7 @@
    "provides" : {
       "Perl::Lexer" : {
          "file" : "lib/Perl/Lexer.pm",
-         "version" : "0.04"
+         "version" : "0.05"
       },
       "Perl::Lexer::Token" : {
          "file" : "lib/Perl/Lexer/Token.pm"
@@ -73,7 +73,7 @@
          "web" : "https://github.com/tokuhirom/Perl-Lexer"
       }
    },
-   "version" : "0.04",
+   "version" : "0.05",
    "x_contributors" : [
       "Kenichi Ishigaki <ishigaki@cpan.org>"
    ]
