@@ -1,5 +1,8 @@
 Revision history for Perl extension Perl-Lexer
 
+0.06 2014-05-27T09:55:06Z
+    - Supported 5.20.0
+
 0.05 2014-04-28T08:14:28Z
     - Supported 5.19.11
     - Removed duplicated headers
